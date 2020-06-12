@@ -23,6 +23,7 @@ class DiagonalEncoder(nn.Module):
         logvar = self.logvar_layer(output)
         return MultivariateNormalDiag(mu, F.softplus(logvar))
 
+
 class JointEncoder(nn.Module):
     def __init__(self, input_size, z_size, hidden_sizes=(64, 64), window_size=3, transpose=False, **kwargs):
         """ Encoder with 1d-convolutional network and factorized Normal posterior
@@ -35,7 +36,8 @@ class JointEncoder(nn.Module):
         """
         super(JointEncoder, self).__init__()
         self.z_size = int(z_size)
-        self.net = make_cnn(input_size, (z_size, z_size), hidden_sizes, window_size)
+        self.net, self.mu_layer, self.logvar_layer = make_cnn(
+            input_size, (z_size, z_size), hidden_sizes, window_size)
         self.transpose = transpose
 
     def __call__(self, x):
@@ -48,8 +50,6 @@ class JointEncoder(nn.Module):
             logvar = torch.transpose(logvar, num_dim-1, num_dim-2)
             return MultivariateNormalDiag(mu, F.softplus(logvar))
         return MultivariateNormalDiag(mu, F.softplus(logvar))
-        
-        
 
 
 class BandedJointEncoder(tf.keras.Model):
