@@ -5,7 +5,7 @@ import torch.autograd as ann
 #from encoders import DiagonalEncoder
 
 from utils import LinearMasked, reduce_logmeanexp
-
+from kernels import *
 
 # class VAE(nn.Module):
 #     def __init__(self, nsize):
