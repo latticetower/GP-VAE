@@ -3,10 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as ann
 #from encoders import DiagonalEncoder
-
+import numpy as np
 from utils import LinearMasked, reduce_logmeanexp
 from kernels import *
-
+from encoders import *
+from decoders import *
 # class VAE(nn.Module):
 #     def __init__(self, nsize):
 #         super(VAE, self).__init__()
@@ -71,6 +72,8 @@ class VAE(nn.Module):
         self.prior = None
 
     def encode(self, x):
+        if not torch.is_tensor(x):
+            x = torch.tensor(x).float()
         if self.preprocessor is not None:
             x_shape = x.shape
             new_shape = [x_shape[0] * x_shape[1]] + list(self.preprocessor.image_shape)
@@ -81,6 +84,8 @@ class VAE(nn.Module):
         #x = tf.identity(x)  # in case x is not a Tensor already...
         
     def decode(self, z):
+        if not torch.is_tensor(x):
+            x = torch.tensor(z).float()
         #z = tf.identity(z)  # in case z is not a Tensor already...
         return self.decoder(z)
 
@@ -103,29 +108,43 @@ class VAE(nn.Module):
     def compute_nll(self, x, y=None, m_mask=None):
         # Used only for evaluation
         assert len(x.shape) == 3, "Input should have shape: [batch_size, time_length, data_dim]"
+        if not torch.is_tensor(x):
+            x = torch.tensor(x).float()
         if y is None:
             y = x
+        if not torch.is_tensor(y):
+            y = torch.tensor(y).float()
         z_sample = self.encode(x).sample()
         x_hat_dist = self.decode(z_sample)
         nll = -x_hat_dist.log_prob(y)  # shape=(BS, TL, D)
         nll = torch.where(torch.isfinite(nll), nll, torch.zeros_like(nll))
         if m_mask is not None:
-            m_mask = m_mask.astype(torch.bool)
+            if not torch.is_tensor(m_mask):
+                m_mask = torch.tensor(m_mask)
+            m_mask = m_mask.type(torch.bool)
             nll = torch.where(m_mask, nll, torch.zeros_like(nll))  # !!! inverse mask, set zeros for observed
         return nll.sum()
 
     def compute_mse(self, x, y=None, m_mask=None, binary=False):
         # Used only for evaluation
         assert len(x.shape) == 3, "Input should have shape: [batch_size, time_length, data_dim]"
-        if y is None: y = x
+        if not torch.is_tensor(x):
+            x = torch.tensor(x).float()
+        if y is None:
+            y = x
+        if not torch.is_tensor(y):
+            y = torch.tensor(y).float()
+        
+        z_mean = self.encode(x).mean
 
-        z_mean = self.encode(x).mean()
-        x_hat_mean = self.decode(z_mean).mean()  # shape=(BS, TL, D)
+        x_hat_mean = self.decode(z_mean).mean  # shape=(BS, TL, D)
         if binary:
             x_hat_mean = torch.round(x_hat_mean)
         mse = (x_hat_mean - y)**2
         if m_mask is not None:
-            m_mask = m_mask.astype(torch.bool)
+            if not torch.is_tensor(m_mask):
+                m_mask = torch.tensor(m_mask)
+            m_mask = m_mask.type(torch.bool)
             mse = torch.where(m_mask, mse, torch.zeros_like(mse))  # !!! inverse mask, set zeros for observed
         return mse.sum()
     
@@ -136,14 +155,13 @@ class VAE(nn.Module):
         if m_mask is not None:
             #m_mask = tf.identity(m_mask)  # in case m_mask is not a Tensor already...
             m_mask = m_mask.repeat(self.M*self.K, 1, 1)
-            m_mask = m_mask.astype(torch.bool)
+            m_mask = m_mask.type(torch.bool)
             #m_mask = tf.tile(m_mask, [self.M * self.K, 1, 1])  # shape=(M*K*BS, TL, D)
             #m_mask = tf.cast(m_mask, tf.bool)
         pz = self._get_prior()
         qz_x = self.encode(x)
         z = qz_x.sample()
         px_z = self.decode(z)
-        print(x.shape, px_z, z.shape)
         nll = -px_z.log_prob(x)  # shape=(M*K*BS, TL, D)
         nll = torch.where(torch.isfinite(nll), nll, torch.zeros_like(nll))
         if m_mask is not None:
@@ -193,7 +211,7 @@ class VAE(nn.Module):
 class HI_VAE(VAE):
     """ HI-VAE model, where the reconstruction term in ELBO is summed only over observed components """
     def compute_loss(self, x, m_mask=None, return_parts=False):
-        return self._compute_loss(x, m_mask=m_mask, return_parts=return)
+        return self._compute_loss(x, m_mask=m_mask, return_parts=return_parts)
 
 
 class GP_VAE(HI_VAE):
@@ -219,6 +237,8 @@ class GP_VAE(HI_VAE):
         self.prior = None
         
     def decode(self, z):
+        if not torch.is_tensor(z):
+            z = torch.tensor(z).float()
         num_dim = len(z.shape)
         assert num_dim > 2
         return self.decoder(torch.transpose(z, num_dim - 1, num_dim - 2))
@@ -248,8 +268,8 @@ class GP_VAE(HI_VAE):
                     total += multiplier
                 tiled_matrices.append(
                     #tf.tile(tf.expand_dims(kernel_matrices[i], 0), [multiplier, 1, 1]))
-                    torch.expand_dims(kernel_matrices[i], 0).repeat(multiplier, 1, 1))
-            kernel_matrix_tiled = np.concatenate(tiled_matrices)
+                    torch.unsqueeze(kernel_matrices[i], 0).repeat(multiplier, 1, 1))
+            kernel_matrix_tiled = torch.cat(tiled_matrices)
             assert len(kernel_matrix_tiled) == self.latent_dim
             self.prior = torch.distributions.MultivariateNormal(
                 loc=torch.zeros(self.latent_dim, self.time_length),

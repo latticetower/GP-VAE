@@ -2,9 +2,9 @@ import torch
 
 
 def rbf_kernel(T, length_scale):
-    xs = torch.range(T, dtype=tf.float32)
-    xs_in = torch.expand_dims(xs, 0)
-    xs_out = torch.expand_dims(xs, 1)
+    xs = torch.arange(T).float()
+    xs_in = torch.unsqueeze(xs, 0)
+    xs_out = torch.unsqueeze(xs, 1)
     distance_matrix = (xs_in - xs_out)**2
     distance_matrix_scaled = distance_matrix / length_scale ** 2
     kernel_matrix = torch.exp(-distance_matrix_scaled)
@@ -25,19 +25,19 @@ def diffusion_kernel(T, length_scale):
 
 
 def matern_kernel(T, length_scale):
-    xs = torch.range(T, dtype=tf.float32)
-    xs_in = torch.expand_dims(xs, 0)
-    xs_out = torch.expand_dims(xs, 1)
+    xs = torch.arange(T).float() 
+    xs_in = torch.unsqueeze(xs, 0)
+    xs_out = torch.unsqueeze(xs, 1)
     distance_matrix = torch.abs(xs_in - xs_out)
-    distance_matrix_scaled = distance_matrix / torch.sqrt(length_scale).astype(torch.float32)
+    distance_matrix_scaled = distance_matrix / torch.sqrt(length_scale).type(torch.float32)
     kernel_matrix = torch.exp(-distance_matrix_scaled)
     return kernel_matrix
 
 
 def cauchy_kernel(T, sigma, length_scale):
-    xs = torch.range(T, dtype=torch.float32)
-    xs_in = torch.expand_dims(xs, 0)
-    xs_out = torch.expand_dims(xs, 1)
+    xs = torch.arange(T).float()#, dtype=torch.float32)
+    xs_in = torch.unsqueeze(xs, 0)
+    xs_out = torch.unsqueeze(xs, 1)
     distance_matrix = (xs_in - xs_out)**2
     distance_matrix_scaled = distance_matrix / length_scale ** 2
     #kernel_matrix = tf.math.divide(sigma, (distance_matrix_scaled + 1.))

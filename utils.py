@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as ann
+import numpy as np
+
 
 class LinearMasked(nn.Linear):
     __constants__ = ['in_features', 'out_features']
@@ -15,10 +17,40 @@ class LinearMasked(nn.Linear):
             ids = ann.Variable(m.nonzero()[:, 1])
             X = x.index_select(1, ids)
             W = self.weight.index_select(1, ids)
-            #print(X.shape, W.shape, self.weight.shape)
             full_batch.append(F.linear(X, W, self.bias))
         return torch.cat(full_batch, 0)
-        #return F.linear(input, self.weight, self.bias)
+
+
+class CustomConv1d(torch.nn.Conv1d):
+    def __init(self, *args, **kwargs):
+        super(CustomConv1d, self).__init__(*args, **kwargs)
+        
+    def forward(self, x):
+        if len(x.shape) > 2:
+            shape = list(np.arange(len(x.shape)))
+            new_shape = [0, shape[-1]] + shape[1:-1]
+            out = super(CustomConv1d, self).forward(x.permute(*new_shape))
+            shape = list(np.arange(len(out.shape)))
+            new_shape = [0, shape[-1]] + shape[1:-1]
+            if self.kernel_size[0] % 2==0:
+                out = F.pad(out, (0,-1), "constant", 0)
+            return out.permute(new_shape)
+
+        return super(CustomConv1d, self).forward(x)
+
+
+class CustomLinear(torch.nn.Linear):
+    def __init(self, *args, **kwargs):
+        super(CustomLinear, self).__init__(*args, **kwargs)
+
+    def forward(self, x):
+        if len(x.shape) > 2:
+            inshape = tuple(x.shape)
+            N = np.multiply.reduce(inshape[:-1])
+            out = super(CustomLinear, self).forward(x.contiguous().view(N, inshape[-1]))
+            return out.view(*(inshape[:-1]+(out.shape[-1], )))
+            
+        return super(CustomLinear, self).forward(x)
 
 
 def make_nn(input_size, output_size, hidden_sizes):
@@ -30,15 +62,16 @@ def make_nn(input_size, output_size, hidden_sizes):
     layers = []
     insize = input_size
     for outsize in hidden_sizes:
-        layers.append(nn.Linear(insize, outsize))
+        layers.append(CustomLinear(insize, outsize))
         layers.append(nn.LeakyReLU())
         insize = outsize
     if isinstance(output_size, tuple):
-        return [nn.Sequential(*layers)] + [ nn.Linear(insize, k) for k in output_size]
-    layers.append(nn.Linear(insize, output_size))
+        return [nn.Sequential(*layers)] + [ CustomLinear(insize, k) for k in output_size]
+    layers.append(CustomLinear(insize, output_size))
     return nn.Sequential(*layers)
     #layers.append(nn.Linear(insize, output_size))
     #return nn.Sequential(*layers)
+
 
 def make_cnn(input_size, output_size, hidden_sizes, kernel_size=3):
     """ Construct neural network consisting of
@@ -49,18 +82,22 @@ def make_cnn(input_size, output_size, hidden_sizes, kernel_size=3):
                              The tuple length sets the number of hidden layers.
         :param kernel_size: kernel size for convolutional layer
     """
-    cnn_layer = [torch.nn.Conv1d(input_size, hidden_sizes[0], kernel_size=kernel_size, padding=1)]
+    padding = kernel_size // 2
+    
+    cnn_layer = CustomConv1d(input_size, hidden_sizes[0],
+        kernel_size=kernel_size, padding=padding)
     layers = [cnn_layer]
+    
     for i, h in zip(hidden_sizes, hidden_sizes[1:]):
-        layes.extend([
-            nn.Linear(i, h),
+        layers.extend([
+            CustomLinear(i, h),
             nn.ReLU()
         ])
     if isinstance(output_size, tuple):
         net = nn.Sequential(*layers)
-        return [net] + [ nn.Linear(hidden_sizes[-1], o) for o in output_size ]
+        return [net] + [ CustomLinear(hidden_sizes[-1], o) for o in output_size ]
     
-    layers.append(nn.Linear(hidden_sizes[-1], output_size))
+    layers.append(CustomLinear(hidden_sizes[-1], output_size))
     return nn.Sequential(*layers)
     #cnn_layer = [tf.keras.layers.Conv1D(hidden_sizes[0], kernel_size=kernel_size,
     #                                    padding="same", dtype=tf.float32)]
@@ -101,3 +138,11 @@ class MultivariateNormalDiag(torch.distributions.MultivariateNormal):
             ]).reshape(shape + shape[-1:])
 
         super(MultivariateNormalDiag, self).__init__(mu, scale_tril=scale)
+
+
+def clip_gradients(net, clip_value=1e5):
+    for p in net.parameters():
+        p.register_hook(
+            lambda grad: torch.clamp(
+                torch.where(torch.isnan(grad), torch.ones_like(grad)*np.inf, grad),
+                -clip_value, clip_value))

@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 import tensorflow as tf
-from utils import make_nn, MultivariateNormalDiag
+from utils import make_nn, make_cnn, MultivariateNormalDiag
 
-
+        
 class DiagonalEncoder(nn.Module):
     def __init__(self, input_size, z_size, hidden_sizes=(64, 64), **kwargs):
         """ Encoder with factorized Normal posterior over temporal dimension
@@ -40,7 +40,7 @@ class JointEncoder(nn.Module):
             input_size, (z_size, z_size), hidden_sizes, window_size)
         self.transpose = transpose
 
-    def __call__(self, x):
+    def __call__(self, x):    
         output = self.net(x)
         mu = self.mu_layer(output)
         logvar = self.logvar_layer(output)
